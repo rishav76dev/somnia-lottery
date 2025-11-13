@@ -21,15 +21,29 @@ client.watchContractEvent({
   eventName: "TicketPurchased",
   onLogs: async (logs) => {
     for (const log of logs) {
-      const { id, newTicketsSold, newPot } = log.args;
+      const { id, buyer, newTicketsSold, newPot } = log.args;
 
+      // Update lottery-specific stream
       await sdk.streams.set(`lottery:${id}`, {
         ticketsSold: Number(newTicketsSold),
         pot: newPot.toString(),
         status: "open"
       });
 
-      console.log(`🎟️ Ticket Purchased → Lottery ${id} | Total Sold: ${newTicketsSold}`);
+      // Broadcast to global activity stream
+      await sdk.streams.emitEvents(
+        `lottery:global`,
+        {},
+        "TicketPurchased",
+        {
+          id: Number(id),
+          buyer,
+          ticketsSold: Number(newTicketsSold),
+          pot: newPot.toString()
+        }
+      );
+
+      console.log(`🎟️ Ticket Purchased → Lottery ${id} | Total Sold: ${newTicketsSold} | Buyer: ${buyer}`);
     }
   }
 });
@@ -43,7 +57,7 @@ client.watchContractEvent({
     for (const log of logs) {
       const { id, winner, payoutWinner, totalProfit } = log.args;
 
-      // Update on-chain-reactive lottery state and broadcast real-time UI update
+      // Update lottery-specific stream and emit event
       await sdk.streams.emitEvents(
         `lottery:${id}`,
         {
@@ -58,6 +72,18 @@ client.watchContractEvent({
           winner,
           payoutWinner: payoutWinner.toString(),
           creatorProfit: totalProfit.toString()
+        }
+      );
+
+      // Broadcast to global activity stream
+      await sdk.streams.emitEvents(
+        `lottery:global`,
+        {},
+        "WinnerAnnounced",
+        {
+          id: Number(id),
+          winner,
+          payoutWinner: payoutWinner.toString()
         }
       );
 
