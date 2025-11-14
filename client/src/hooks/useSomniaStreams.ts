@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { sdsClient } from '@/lib/somnia'
 import { Address } from 'viem'
+import { LOTTERY_CONTRACT_ADDRESS } from '@/lib/lotteryContract'
 
 export interface LotteryStreamData {
   ticketsSold?: number
@@ -9,6 +10,10 @@ export interface LotteryStreamData {
   winner?: Address
   creatorProfit?: string
   payoutWinner?: string
+  creator?: Address
+  ticketPrice?: string
+  prizeAmount?: string
+  buyDeadline?: number
 }
 
 export interface WinnerAnnouncedEvent {
@@ -29,35 +34,44 @@ export function useLotteryStream(lotteryId: bigint | null) {
   useEffect(() => {
     if (!lotteryId) return
 
-    const streamKey = `lottery:${lotteryId.toString()}`
-    let unsubscribe: (() => void) | undefined
+    let unsubscribeFunc: (() => void) | undefined
 
     const setupStream = async () => {
       try {
-        // Get initial state
-        const initialData = await sdsClient.get(streamKey)
-        if (initialData) {
-          setStreamData(initialData as LotteryStreamData)
-        }
-
-        // Subscribe to real-time updates
-        unsubscribe = await sdsClient.subscribe(
-          streamKey,
-          (data) => {
+        // Subscribe to real-time updates using the correct Somnia Streams API
+        const subscription = await sdsClient.subscribe({
+          somniaStreamsEventId: `lottery:${lotteryId.toString()}`,
+          ethCalls: [], // No eth calls needed for simple event listening
+          onlyPushChanges: true,
+          onData: (data: any) => {
             console.log('📡 Stream update received:', data)
-            setStreamData(data as LotteryStreamData)
-            setIsConnected(true)
-          },
-          (event) => {
-            // Handle custom events (e.g., WinnerAnnounced)
-            console.log('🎉 Event received:', event)
-            if (event.type === 'WinnerAnnounced') {
-              setLastEvent(event.data as WinnerAnnouncedEvent)
-            }
-          }
-        )
 
-        setIsConnected(true)
+            // Parse the data based on your worker's set() structure
+            if (data && typeof data === 'object') {
+              setStreamData(data as LotteryStreamData)
+              setIsConnected(true)
+
+              // Check for winner announcement events
+              if (data.status === 'drawn' && data.winner) {
+                setLastEvent({
+                  id: Number(lotteryId),
+                  winner: data.winner,
+                  payoutWinner: data.payoutWinner || '0',
+                  creatorProfit: data.creatorProfit || '0'
+                })
+              }
+            }
+          },
+          onError: (error: Error) => {
+            console.error('Stream error:', error)
+            setIsConnected(false)
+          }
+        })
+
+        if (subscription) {
+          unsubscribeFunc = subscription.unsubscribe
+          setIsConnected(true)
+        }
       } catch (error) {
         console.error('Failed to setup Somnia Stream:', error)
         setIsConnected(false)
@@ -67,8 +81,8 @@ export function useLotteryStream(lotteryId: bigint | null) {
     setupStream()
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe()
+      if (unsubscribeFunc) {
+        unsubscribeFunc()
       }
       setIsConnected(false)
     }
@@ -87,29 +101,30 @@ export function useCreatorStream(creatorAddress: Address | undefined) {
   useEffect(() => {
     if (!creatorAddress) return
 
-    const streamKey = `creator:${creatorAddress}`
-    let unsubscribe: (() => void) | undefined
+    let unsubscribeFunc: (() => void) | undefined
 
     const setupStream = async () => {
       try {
-        // Get initial state
-        const initialData = await sdsClient.get(streamKey)
-        if (initialData && typeof initialData === 'object' && 'creatorProfit' in initialData) {
-          setCreatorProfit((initialData as { creatorProfit: string }).creatorProfit)
-        }
-
-        // Subscribe to real-time updates
-        unsubscribe = await sdsClient.subscribe(
-          streamKey,
-          (data) => {
+        const subscription = await sdsClient.subscribe({
+          somniaStreamsEventId: `creator:${creatorAddress}`,
+          ethCalls: [],
+          onlyPushChanges: true,
+          onData: (data: any) => {
             if (data && typeof data === 'object' && 'creatorProfit' in data) {
-              setCreatorProfit((data as { creatorProfit: string }).creatorProfit)
+              setCreatorProfit(data.creatorProfit as string)
             }
             setIsConnected(true)
+          },
+          onError: (error: Error) => {
+            console.error('Creator stream error:', error)
+            setIsConnected(false)
           }
-        )
+        })
 
-        setIsConnected(true)
+        if (subscription) {
+          unsubscribeFunc = subscription.unsubscribe
+          setIsConnected(true)
+        }
       } catch (error) {
         console.error('Failed to setup creator stream:', error)
         setIsConnected(false)
@@ -119,8 +134,8 @@ export function useCreatorStream(creatorAddress: Address | undefined) {
     setupStream()
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe()
+      if (unsubscribeFunc) {
+        unsubscribeFunc()
       }
       setIsConnected(false)
     }
@@ -141,30 +156,39 @@ export function useGlobalLotteryActivity() {
   }>>([])
 
   useEffect(() => {
-    const streamKey = 'lottery:global'
-    let unsubscribe: (() => void) | undefined
+    let unsubscribeFunc: (() => void) | undefined
 
     const setupStream = async () => {
       try {
-        unsubscribe = await sdsClient.subscribe(
-          streamKey,
-          (data) => {
-            // Handle global lottery updates
+        const subscription = await sdsClient.subscribe({
+          somniaStreamsEventId: 'lottery:global',
+          ethCalls: [],
+          onlyPushChanges: true,
+          eventContractSources: [LOTTERY_CONTRACT_ADDRESS], // Listen to lottery contract events
+          onData: (data: any) => {
             console.log('🌍 Global activity:', data)
+
+            // Add activity to the list
+            if (data && typeof data === 'object') {
+              setActivities(prev => [
+                {
+                  type: data.eventName || 'update',
+                  lotteryId: data.id?.toString() || 'unknown',
+                  data: data,
+                  timestamp: Date.now(),
+                },
+                ...prev.slice(0, 49), // Keep last 50 activities
+              ])
+            }
           },
-          (event) => {
-            // Handle global events
-            setActivities(prev => [
-              {
-                type: event.type,
-                lotteryId: event.data?.id || 'unknown',
-                data: event.data,
-                timestamp: Date.now(),
-              },
-              ...prev.slice(0, 49), // Keep last 50 activities
-            ])
+          onError: (error: Error) => {
+            console.error('Global stream error:', error)
           }
-        )
+        })
+
+        if (subscription) {
+          unsubscribeFunc = subscription.unsubscribe
+        }
       } catch (error) {
         console.error('Failed to setup global stream:', error)
       }
@@ -173,8 +197,8 @@ export function useGlobalLotteryActivity() {
     setupStream()
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe()
+      if (unsubscribeFunc) {
+        unsubscribeFunc()
       }
     }
   }, [])

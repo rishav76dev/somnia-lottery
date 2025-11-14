@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useLottery } from '@/hooks/useLotteries'
 import { useParticipants } from '@/hooks/useParticipants'
 import { useBuyTicket } from '@/hooks/useBuyTicket'
+import { useLotteryStream } from '@/hooks/useSomniaStreams'
 import { useAccount } from 'wagmi'
 import { formatEther } from 'viem'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft, Trophy, Ticket, Clock, Users, Loader2, X, PartyPopper } from 'lucide-react'
+import { LiveActivityFeed } from '@/components/LiveActivityFeed'
 
 export default function LotteryDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
@@ -18,11 +20,33 @@ export default function LotteryDetailPage({ params }: { params: Promise<{ id: st
   const { address } = useAccount()
   const lotteryId = BigInt(resolvedParams.id)
 
-  const { lottery, isLoading: isLoadingLottery } = useLottery(lotteryId)
+  // All hooks must be called before any conditional returns
+  const { lottery, isLoading: isLoadingLottery, refetch: refetchLottery } = useLottery(lotteryId)
+  const { streamData } = useLotteryStream(lotteryId)
   const { participants, isLoading: isLoadingParticipants } = useParticipants(lotteryId, lottery?.ticketsSold)
   const { buyTicket, isPending, isSuccess } = useBuyTicket()
   const [showWinnerPopup, setShowWinnerPopup] = useState(false)
 
+  const now = Math.floor(Date.now() / 1000)
+  const isClosed = lottery ? (lottery.status !== 0 || now > lottery.buyDeadline) : false
+  const isActive = !isClosed
+  const hasWinner = lottery ? lottery.winner !== '0x0000000000000000000000000000000000000000' : false
+
+  // Refetch lottery data when stream updates (new tickets sold)
+  useEffect(() => {
+    if (streamData && streamData.ticketsSold !== undefined) {
+      refetchLottery()
+    }
+  }, [streamData, refetchLottery])
+
+  // Show winner popup when page loads if lottery has ended with a winner
+  useEffect(() => {
+    if (lottery && isClosed && hasWinner) {
+      setShowWinnerPopup(true)
+    }
+  }, [lottery, isClosed, hasWinner])
+
+  // Conditional renders after all hooks
   if (isLoadingLottery) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -38,18 +62,6 @@ export default function LotteryDetailPage({ params }: { params: Promise<{ id: st
       </div>
     )
   }
-
-  const now = Math.floor(Date.now() / 1000)
-  const isClosed = lottery.status !== 0 || now > lottery.buyDeadline
-  const isActive = !isClosed
-  const hasWinner = lottery.winner !== '0x0000000000000000000000000000000000000000'
-
-  // Show winner popup when page loads if lottery has ended with a winner
-  useEffect(() => {
-    if (isClosed && hasWinner) {
-      setShowWinnerPopup(true)
-    }
-  }, [isClosed, hasWinner])
 
   return (
     <main className="min-h-screen p-8 pt-24">
@@ -199,57 +211,67 @@ export default function LotteryDetailPage({ params }: { params: Promise<{ id: st
           </Card>
         )}
 
-        {/* Participants Table */}
-        <Card className="bg-black/30 border-purple-400/20">
-          <CardHeader>
-            <h2 className="text-2xl font-bold text-white">
-              <Users className="w-6 h-6 inline mr-2" />
-              All Participants
-            </h2>
-          </CardHeader>
-          <CardContent>
-            {isLoadingParticipants ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-              </div>
-            ) : participants.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
-                No participants yet. Be the first to join!
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-purple-400/20">
-                      <TableHead className="text-purple-300">#</TableHead>
-                      <TableHead className="text-purple-300">Wallet Address</TableHead>
-                      <TableHead className="text-purple-300 text-right">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {participants.map((participant: string, index: number) => (
-                      <TableRow key={index} className="border-purple-400/10">
-                        <TableCell className="text-white font-medium">{index + 1}</TableCell>
-                        <TableCell className="text-white font-mono">
-                          {participant}
-                          {participant === address && (
-                            <span className="ml-2 text-xs bg-blue-600 px-2 py-1 rounded">You</span>
-                          )}
-                          {participant === lottery.winner && hasWinner && (
-                            <span className="ml-2 text-xs bg-yellow-600 px-2 py-1 rounded">🏆 Winner</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-green-400">✓ Entered</span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Live Activity Feed */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          <div className="lg:col-span-2">
+            {/* Participants Table */}
+            <Card className="bg-black/30 border-purple-400/20">
+              <CardHeader>
+                <h2 className="text-2xl font-bold text-white">
+                  <Users className="w-6 h-6 inline mr-2" />
+                  All Participants
+                </h2>
+              </CardHeader>
+              <CardContent>
+                {isLoadingParticipants ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+                  </div>
+                ) : participants.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    No participants yet. Be the first to join!
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-purple-400/20">
+                          <TableHead className="text-purple-300">#</TableHead>
+                          <TableHead className="text-purple-300">Wallet Address</TableHead>
+                          <TableHead className="text-purple-300 text-right">Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {participants.map((participant: string, index: number) => (
+                          <TableRow key={index} className="border-purple-400/10">
+                            <TableCell className="text-white font-medium">{index + 1}</TableCell>
+                            <TableCell className="text-white font-mono">
+                              {participant}
+                              {participant === address && (
+                                <span className="ml-2 text-xs bg-blue-600 px-2 py-1 rounded">You</span>
+                              )}
+                              {participant === lottery.winner && hasWinner && (
+                                <span className="ml-2 text-xs bg-yellow-600 px-2 py-1 rounded">🏆 Winner</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className="text-green-400">✓ Entered</span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div>
+            {/* Live Stream Updates */}
+            <LiveActivityFeed lotteryId={lotteryId} />
+          </div>
+        </div>
       </div>
 
       {/* Winner Announcement Popup */}

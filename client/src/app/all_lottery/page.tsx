@@ -1,16 +1,38 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLotteries, useLottery } from '@/hooks/useLotteries'
+import { useGlobalLotteryActivity } from '@/hooks/useSomniaStreams'
 import { LotteryCard } from '@/components/LotteryCard'
+import { GlobalActivityTicker } from '@/components/GlobalActivityTicker'
 import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
 
 export default function ParticipatePage() {
   const router = useRouter()
-  const { lotteryCount, isLoading } = useLotteries()
+  const { lotteryCount, isLoading, refetch } = useLotteries()
+  const { activities } = useGlobalLotteryActivity()
   const [filter, setFilter] = useState<'active' | 'ended' | 'all'>('active')
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  // Refetch lottery count when new lottery is created from global stream
+  useEffect(() => {
+    if (activities.length > 0) {
+      const latestActivity = activities[0]
+
+      // Refetch when new lottery is created
+      if (latestActivity.type === 'LotteryCreated') {
+        refetch()
+        setRefreshKey(prev => prev + 1) // Force re-render of lottery cards
+      }
+
+      // Refetch when lottery status changes (winner announced, expired)
+      if (latestActivity.type === 'WinnerAnnounced' || latestActivity.type === 'LotteryExpired') {
+        setRefreshKey(prev => prev + 1) // Force re-render to update status
+      }
+    }
+  }, [activities, refetch])
 
   if (isLoading) {
     return (
@@ -27,6 +49,9 @@ export default function ParticipatePage() {
         <h1 className="text-4xl font-bold text-white mb-6">
           🎟️ Participate in Lotteries
         </h1>
+
+        {/* Global Activity Ticker */}
+        <GlobalActivityTicker />
 
         {/* Filters */}
         <div className="flex gap-3 mb-8">
@@ -52,7 +77,7 @@ export default function ParticipatePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: lotteryCount }, (_, i) => (
             <LotteryCardWrapper
-              key={i}
+              key={`${i}-${refreshKey}`}
               id={BigInt(i + 1)}
               filter={filter}
               onSelect={() => router.push(`/lottery/${i + 1}`)}
@@ -74,7 +99,26 @@ function LotteryCardWrapper({
   filter: 'active' | 'ended' | 'all'
   onSelect: () => void
 }) {
-  const { lottery, isLoading } = useLottery(id)
+  const { lottery, isLoading, refetch } = useLottery(id)
+  const { activities } = useGlobalLotteryActivity()
+
+  // Refetch this specific lottery when its status changes via stream
+  useEffect(() => {
+    if (activities.length > 0) {
+      const latestActivity = activities[0]
+      const activityLotteryId = latestActivity.lotteryId
+
+      // If this lottery's status changed, refetch its data
+      if (
+        activityLotteryId === id.toString() &&
+        (latestActivity.type === 'WinnerAnnounced' ||
+         latestActivity.type === 'LotteryExpired' ||
+         latestActivity.type === 'TicketPurchased')
+      ) {
+        refetch()
+      }
+    }
+  }, [activities, id, refetch])
 
   if (isLoading || !lottery) return null
 

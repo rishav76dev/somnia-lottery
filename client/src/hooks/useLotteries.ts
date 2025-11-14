@@ -4,7 +4,7 @@ import { Address } from 'viem'
 
 export function useLotteries() {
   // Get total lottery count
-  const { data: lotteryCount, isLoading: isLoadingCount } = useReadContract({
+  const { data: lotteryCount, isLoading: isLoadingCount, refetch } = useReadContract({
     address: LOTTERY_CONTRACT_ADDRESS,
     abi: LOTTERY_ABI,
     functionName: 'lotteryCount',
@@ -13,6 +13,7 @@ export function useLotteries() {
   return {
     lotteryCount: lotteryCount ? Number(lotteryCount) : 0,
     isLoading: isLoadingCount,
+    refetch,
   }
 }
 
