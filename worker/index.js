@@ -14,6 +14,47 @@ const sdk = new SDK({
   public: client
 });
 
+// ---- LOTTERY CREATED ----
+client.watchContractEvent({
+  address: CONTRACT_ADDRESS,
+  abi,
+  eventName: "LotteryCreated",
+  onLogs: async (logs) => {
+    for (const log of logs) {
+      const { id, creator, ticketPrice, prizeAmount, buyDeadline } = log.args;
+
+      // Initialize the lottery SDS object
+      await sdk.streams.set(`lottery:${id}`, {
+        ticketsSold: 0,
+        pot: prizeAmount.toString(),
+        status: "open",
+        creator,
+        ticketPrice: ticketPrice.toString(),
+        prizeAmount: prizeAmount.toString(),
+        buyDeadline: Number(buyDeadline),
+        winner: null
+      });
+
+      // Broadcast global event
+      await sdk.streams.emitEvents(
+        `lottery:global`,
+        {},
+        "LotteryCreated",
+        {
+          id: Number(id),
+          creator,
+          ticketPrice: ticketPrice.toString(),
+          prizeAmount: prizeAmount.toString(),
+          deadline: Number(buyDeadline)
+        }
+      );
+
+      console.log(`🎉 Lottery Created → ID: ${id} | Prize: ${prizeAmount} | Creator: ${creator}`);
+    }
+  }
+});
+
+
 // ---- TICKET PURCHASED ----
 client.watchContractEvent({
   address: CONTRACT_ADDRESS,

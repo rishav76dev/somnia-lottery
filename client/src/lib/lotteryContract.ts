@@ -4,7 +4,6 @@ import { Address } from 'viem'
 export const LOTTERY_CONTRACT_ADDRESS = '0xbAE565eA137FeF32217B78F06f9CA9f0BF17021d' as Address
 
 export const LOTTERY_ABI = [
-[
     {
       "type": "constructor",
       "inputs": [
@@ -304,8 +303,6 @@ export const LOTTERY_ABI = [
       ],
       "anonymous": false
     }
-  ]
-
 ] as const
 
 export enum LotteryStatus {

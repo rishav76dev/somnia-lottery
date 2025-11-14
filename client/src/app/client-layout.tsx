@@ -17,10 +17,12 @@ export default function ClientLayout({
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
-      <Providers>
-        <Navbar isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
-        {children}
-      </Providers>
+      <div className="min-h-screen bg-background text-foreground">
+        <Providers>
+          <Navbar isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
+          {children}
+        </Providers>
+      </div>
     </div>
   );
 }
